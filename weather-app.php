@@ -14,7 +14,7 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     $visitor_name = isset($_GET['visitor_name']) ? htmlspecialchars($_GET['visitor_name']) : null;
 
     if (empty($visitor_name)) {
-        echo json_encode(["error" => "Please enter a valid name. Encode your request in the form: 'http://kendrick.infinityfreeapp.com/weather-app.php?visitor_name=YourName'"]);
+        echo json_encode(["error" => "Please enter a valid name. Encode your request in the form: 'http://yourdomain.com/api/hello?visitor_name=YourName'"]);
         exit;
     }
 
@@ -28,52 +28,103 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
     // Define API keys and endpoints
     $weather_api_keys = [
         'weatherapi' => '6c71540d41ec4442a8c51559240107',
-        'openweathermap' => 'c62a80c3b0148cfab2eef4a80363c853'
+        'openweathermap' => 'c62a80c3b0148cfab2eef4a80363c853' 
     ];
-    $location_token = '168b0b17f6478f';
-    $location_url = "http://ipinfo.io/{$client_ip}?token={$location_token}";
+    $ipinfo_token = '168b0b17f6478f'; 
+    $ipstack_token = 'IPSTACK_API_KEY'; 
+    $ipgeolocation_token = 'ea90e7e8ff07435a9476aeac4dcf234e'; 
+    $location_urls = [
+        "ipinfo" => "https://ipinfo.io/{$client_ip}?token={$ipinfo_token}",
+        "ipstack" => "http://api.ipstack.com/{$client_ip}?access_key={$ipstack_token}",
+        "ipgeolocation" => "https://api.ipgeolocation.io/ipgeo?apiKey={$ipgeolocation_token}&ip={$client_ip}"
+    ];
 
     try {
-        // Fetch the location data from ipinfo.io
-        $location_response = @file_get_contents($location_url);
+        $cities = [];
+        $latitude = null;
+        $longitude = null;
 
-        if ($location_response === FALSE) {
-            throw new Exception('Failed to get location data.');
+        // Fetch location data from each API
+        foreach ($location_urls as $key => $url) {
+            $location_response = @file_get_contents($url);
+            if ($location_response !== FALSE) {
+                $location_data = json_decode($location_response, true);
+                switch ($key) {
+                    case 'ipinfo':
+                        $cities[] = $location_data['city'] ?? 'Unknown';
+                        if (!isset($latitude) && isset($location_data['loc'])) {
+                            list($latitude, $longitude) = explode(',', $location_data['loc']);
+                        }
+                        break;
+                    case 'ipstack':
+                        $cities[] = $location_data['city'] ?? 'Unknown';
+                        if (!isset($latitude) && isset($location_data['latitude'])) {
+                            $latitude = $location_data['latitude'];
+                            $longitude = $location_data['longitude'];
+                        }
+                        break;
+                    case 'ipgeolocation':
+                        $cities[] = $location_data['city'] ?? 'Unknown';
+                        if (!isset($latitude) && isset($location_data['latitude'])) {
+                            $latitude = $location_data['latitude'];
+                            $longitude = $location_data['longitude'];
+                        }
+                        break;
+                }
+            }
         }
 
-        // Decode the JSON response from ipinfo.io
-        $location_data = json_decode($location_response, true);
-
-        // Extract the city from the location data
-        $city = $location_data['city'] ?? 'Unknown';
-        $location = explode(",", $location_data['loc']);
+        // Determine the most common city from the responses
+        if (!empty($cities)) {
+            $city_counts = array_count_values($cities);
+            $max_count = max($city_counts);
+            $most_common_cities = array_keys(array_filter($city_counts, function($count) use ($max_count) {
+                return $count == $max_count;
+            }));
+            $city = $most_common_cities[array_rand($most_common_cities)];
+        } else {
+            $city = 'Unknown';
+        }
 
         // Define the weather API URLs
-        $weather_urls = [
-            "weatherapi" => "http://api.weatherapi.com/v1/current.json?key={$weather_api_keys['weatherapi']}&q={$city}&aqi=no",
-            "openweathermap" => "http://api.openweathermap.org/data/2.5/weather?q={$city}&appid={$weather_api_keys['openweathermap']}&units=metric",
-            "openmeteo" => "https://api.open-meteo.com/v1/forecast?latitude={$location[0]}&longitude={$location[1]}&hourly=temperature_2m"
-        ];
+        $weather_urls = [];
+        if (isset($latitude) && isset($longitude)) {
+            $weather_urls = [
+                "weatherapi" => "http://api.weatherapi.com/v1/current.json?key={$weather_api_keys['weatherapi']}&q={$city}&aqi=no",
+                "openweathermap" => "http://api.openweathermap.org/data/2.5/weather?q={$city}&appid={$weather_api_keys['openweathermap']}&units=metric",
+                "openmeteo" => "https://api.open-meteo.com/v1/forecast?latitude={$latitude}&longitude={$longitude}&hourly=temperature_2m"
+            ];
+        }
 
         // Attempt to fetch the weather data from each API in order
-        $weather_data = null;
+        $temperatures = [];
         foreach ($weather_urls as $key => $url) {
             $weather_response = @file_get_contents($url);
             if ($weather_response !== FALSE) {
                 $weather_data = json_decode($weather_response, true);
                 if ($key == 'weatherapi') {
-                    $temperature = $weather_data['current']['temp_c'] ?? 'Unknown';
+                    $temp = $weather_data['current']['temp_c'] ?? null;
+                    if ($temp !== null) $temperatures[] = strval($temp);
                 } elseif ($key == 'openweathermap') {
-                    $temperature = $weather_data['main']['temp'] ?? 'Unknown';
+                    $temp = $weather_data['main']['temp'] ?? null;
+                    if ($temp !== null) $temperatures[] = strval($temp);
                 } elseif ($key == 'openmeteo') {
-                    $temperature = $weather_data['hourly']['temperature_2m'][0] ?? 'Unknown';
+                    $temp = $weather_data['hourly']['temperature_2m'][0] ?? null;
+                    if ($temp !== null) $temperatures[] = strval($temp);
                 }
-                break;
             }
         }
 
-        if ($weather_data === null) {
-            throw new Exception('Failed to get weather data from all sources.');
+        // Determine the most common temperature from the responses
+        if (!empty($temperatures)) {
+            $temperature_counts = array_count_values($temperatures);
+            $max_count = max($temperature_counts);
+            $most_common_temps = array_keys(array_filter($temperature_counts, function($count) use ($max_count) {
+                return $count == $max_count;
+            }));
+            $temperature = $most_common_temps[array_rand($most_common_temps)];
+        } else {
+            $temperature = 'Unknown';
         }
 
         // Prepare the response
