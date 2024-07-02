@@ -46,12 +46,13 @@ if ($_SERVER['REQUEST_METHOD'] == 'GET') {
 
         // Extract the city from the location data
         $city = $location_data['city'] ?? 'Unknown';
+        $location = explode(",", $location_data['loc']);
 
         // Define the weather API URLs
         $weather_urls = [
             "weatherapi" => "http://api.weatherapi.com/v1/current.json?key={$weather_api_keys['weatherapi']}&q={$city}&aqi=no",
             "openweathermap" => "http://api.openweathermap.org/data/2.5/weather?q={$city}&appid={$weather_api_keys['openweathermap']}&units=metric",
-            "openmeteo" => "https://api.open-meteo.com/v1/forecast?latitude={$location_data['loc']}&longitude={$location_data['loc']}&hourly=temperature_2m"
+            "openmeteo" => "https://api.open-meteo.com/v1/forecast?latitude={$location[0]}&longitude={$location[1]}&hourly=temperature_2m"
         ];
 
         // Attempt to fetch the weather data from each API in order
